@@ -1,0 +1,6 @@
+{
+  "name": "KrishiMitra AI",
+  "description": "Multimodal AI agricultural assistant for crop disease detection, voice-based advising, and weather-aware crop management.",
+  "requestFramePermissions": ["camera", "microphone"],
+  "majorCapabilities": ["Multimodal AI", "Crop Diagnosis", "Weather Integration"]
+}
