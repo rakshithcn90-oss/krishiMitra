@@ -67,7 +67,8 @@ export default function App() {
   const [showHistory, setShowHistory] = useState(false);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const recognitionRef = useRef<any>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const audioChunksRef = useRef<Blob[]>([]);
 
   const LANG_MAP: Record<string, string> = {
     "English": "en-IN",
@@ -85,36 +86,48 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    setupSpeechRecognition();
     localStorage.setItem("km_pref_lang", language);
   }, [language]);
 
-  const setupSpeechRecognition = () => {
-    if ("webkitSpeechRecognition" in window || "SpeechRecognition" in window) {
-      if (recognitionRef.current) {
-        recognitionRef.current.stop();
-      }
-      const SpeechRecognition = (window as any).webkitSpeechRecognition || (window as any).SpeechRecognition;
-      recognitionRef.current = new SpeechRecognition();
-      recognitionRef.current.continuous = true;
-      recognitionRef.current.interimResults = true;
-      recognitionRef.current.lang = LANG_MAP[language];
+  const toggleRecording = async () => {
+    if (isRecording) {
+      stopRecording();
+    } else {
+      startRecording();
+    }
+  };
 
-      recognitionRef.current.onresult = (event: any) => {
-        let interimTranscript = "";
-        for (let i = event.resultIndex; i < event.results.length; ++i) {
-          if (event.results[i].isFinal) {
-            setTranscript(prev => prev + " " + event.results[i][0].transcript);
-          } else {
-            interimTranscript += event.results[i][0].transcript;
-          }
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const mediaRecorder = new MediaRecorder(stream);
+      mediaRecorderRef.current = mediaRecorder;
+      audioChunksRef.current = [];
+
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data);
         }
       };
 
-      recognitionRef.current.onerror = (event: any) => {
-        console.error("Speech recognition error", event.error);
-        setIsRecording(false);
+      mediaRecorder.onstop = async () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: "audio/webm" });
+        await uploadAudio(audioBlob);
+        stream.getTracks().forEach(track => track.stop());
       };
+
+      mediaRecorder.start();
+      setIsRecording(true);
+    } catch (err) {
+      console.error("Failed to start recording:", err);
+      alert("Please allow microphone access to use voice features.");
+    }
+  };
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop();
+      setIsRecording(false);
     }
   };
 
@@ -138,13 +151,26 @@ export default function App() {
     }
   };
 
-  const toggleRecording = () => {
-    if (isRecording) {
-      recognitionRef.current?.stop();
-    } else {
-      recognitionRef.current?.start();
+  const uploadAudio = async (blob: Blob) => {
+    const formData = new FormData();
+    formData.append("audio", blob, "recording.webm");
+
+    try {
+      setTranscript("Processing voice...");
+      const res = await fetch("/api/speech-to-text", {
+        method: "POST",
+        body: formData,
+      });
+      const data = await res.json();
+      if (data.transcript) {
+        setTranscript(data.transcript);
+      } else {
+        setTranscript("Couldn't hear you clearly. Please try again.");
+      }
+    } catch (err) {
+      console.error("Upload failed:", err);
+      setTranscript("Error processing voice.");
     }
-    setIsRecording(!isRecording);
   };
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {

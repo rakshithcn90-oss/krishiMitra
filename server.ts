@@ -5,9 +5,16 @@ import cors from "cors";
 import axios from "axios";
 import fs from "fs";
 import { fileURLToPath } from "url";
+import multer from "multer";
+import OpenAI from "openai";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
+
+const upload = multer({ dest: "uploads/" });
+const openai = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,
+});
 
 async function startServer() {
   const app = express();
@@ -71,6 +78,43 @@ async function startServer() {
       res.json(newEntry);
     } catch (error) {
       res.status(500).json({ error: "Failed to save history" });
+    }
+  });
+
+  app.post("/api/speech-to-text", upload.single("audio"), async (req: any, res) => {
+    if (!req.file) {
+      return res.status(400).json({ error: "No audio file provided" });
+    }
+
+    try {
+      console.log(`Processing audio: ${req.file.originalname} (${req.file.size} bytes)`);
+
+      // 3. Improve Whisper usage
+      const transcription = await openai.audio.transcriptions.create({
+        file: fs.createReadStream(req.file.path),
+        model: "whisper-1",
+        // Bias toward Indian languages and agricultural context
+        prompt: "The farmer is speaking in Kannada, Hindi, Telugu, Tamil, or English about agricultural problems, pests, yellow leaves, and crop health.",
+      });
+
+      console.log(`Transcription result: ${transcription.text}`);
+
+      // Cleanup
+      fs.unlinkSync(req.file.path);
+
+      res.json({
+        transcript: transcription.text,
+        language: "auto-detected",
+        confidence: "high" // Whisper is generally high confidence if it returns text
+      });
+    } catch (error: any) {
+      console.error("Speech-to-Text error:", error);
+      if (req.file) fs.unlinkSync(req.file.path);
+      res.status(500).json({ 
+        error: "Transcription failed", 
+        details: error.message,
+        transcript: "ക്ഷಮಿಸಿ, ನಮಗೆ ಸರಿಯಾಗಿ ಕೇಳಿಸಲಿಲ್ಲ. (Sorry, couldn't hear clearly.)" 
+      });
     }
   });
 
